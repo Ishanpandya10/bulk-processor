@@ -25,16 +25,23 @@ import java.io.IOException;
 import java.math.BigInteger;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+
+import static java.util.stream.Collectors.groupingBy;
+import static java.util.stream.Collectors.toList;
 
 public class MsWordReport {
 
+    public static final String INPUT_JSON_FILE_PATH = "src/main/java/org/smvs/bulkprocessor/service/input_config1.json";
+    public static final String DATA_JSON_FILE_PATH = "E:\\Projects\\Smvs-projects\\bulk-processor\\src\\main\\java\\org\\smvs\\bulkprocessor\\service\\test1.json";
     private List<String> headerKey;
     private List<String> headerName;
     private List<String> columnWidth;
@@ -44,17 +51,9 @@ public class MsWordReport {
     private String methodName;
     private boolean isNewPage;
 
-    static List<String> columnNames = Arrays.asList("Member Id", "FID", "SG", "SC", "AG", "AP", "Full Name", "Mobile", "Whatsapp", "Gender", "House No");
-    static List<String> columnKeys = Arrays.asList("ID", "FAMILY_ID", "SATSANG_GRADE", "SATSANG_CATEGORY", "AGE_GRADE", "AGE", "FULL_NAME", "MOBILE", "MOBILE", "GENDER", "FLAT_HOUSE_NO");
-    //static List<String> rowHeaders = Arrays.asList("MemberID","FID","SG","SC","AG","FULL NAME", "FULL ADDRESS", "MOBILE", "CENTER");
+    private String user;
 
-    /*
-    {"reportName":"General Member Report","user":"lkbhudiya","headerKey":"ID,FAMILY_ID,SATSANG_GRADE,SATSANG_CATEGORY,AGE_GRADE,AP,FULL_NAME,MOBILE,WHATSAPP,
-    GENDER,FLAT_HOUSE_NO","headerName":"Member Id,FID,SG,SC,AG,AP,Full Name,Mobile,Whatsapp,Gender,House No",
-    "columnWidth":"125,99,49,45,48,220,424,248,132,88,123","newPage":false,
-    "landscape":false,"topHeader":"CENTER","subHeaderKey":"SOCIETY_NAME","methodName":"getTwoLevelPDFWithSingleHeader"}
-    */
-    private static final int numCols = columnNames.size();
+    private int numCols;
 
     public MsWordReport(JSONObject inputJsonData) {
         extractInputJson(inputJsonData);
@@ -62,15 +61,16 @@ public class MsWordReport {
 
     public static void main(String[] args) throws IOException {
         MsWordReport msWordReport = new MsWordReport(getInputJSON());
-        String jsonString = String.join("", Files.readAllLines(Paths.get("E:\\Projects\\Smvs-projects\\bulk-processor\\src\\main\\java\\org\\smvs\\bulkprocessor\\service\\test.json")));
+
+        String jsonString = String.join("", Files.readAllLines(Paths.get(DATA_JSON_FILE_PATH)));
         JSONObject jsonObject = new JSONObject(jsonString);
         JSONArray data = jsonObject.getJSONArray("DATA");
         msWordReport.exportReportToWord(data);
     }
 
     private void extractInputJson(JSONObject jsonObject) {
-        String headerKey = jsonObject.getString("headerKey");
-        this.headerKey = getListFromCommaSeparatedString(headerKey);
+        String strHeaderKey = jsonObject.getString("headerKey");
+        this.headerKey = getListFromCommaSeparatedString(strHeaderKey);
 
         String headerName = jsonObject.getString("headerName");
         this.headerName = getListFromCommaSeparatedString(headerName);
@@ -87,6 +87,10 @@ public class MsWordReport {
 
         this.isNewPage = jsonObject.getBoolean("newPage");
 
+        this.user = jsonObject.getString("user");
+
+        numCols = this.headerKey.size();
+
     }
 
     private static List<String> getListFromCommaSeparatedString(String width) {
@@ -95,7 +99,7 @@ public class MsWordReport {
 
     private static JSONObject getInputJSON() {
         try {
-            String inputJson = String.join(" ", Files.readAllLines(Paths.get("src/main/java/org/smvs/bulkprocessor/service/input_config.json")));
+            String inputJson = String.join(" ", Files.readAllLines(Paths.get(INPUT_JSON_FILE_PATH)));
             return new JSONObject(inputJson);
         } catch (IOException e) {
             throw new RuntimeException(e);
@@ -105,30 +109,30 @@ public class MsWordReport {
     private void exportReportToWord(JSONArray data) throws IOException {
 
         ObjectMapper objectMapper = new ObjectMapper();
-        List<HashMap<String, String>> allData = objectMapper.readValue(data.toString(), new TypeReference<>() {
+        List<LinkedHashMap<String, String>> allData = objectMapper.readValue(data.toString(), new TypeReference<>() {
         });
 
-        Map<String, List<HashMap<String, String>>> oneLevelGrouping = allData.stream()
-                .collect(Collectors.groupingBy(hm -> hm.get("CENTER")));
+        LinkedHashMap<String, List<LinkedHashMap<String, String>>> oneLevelGrouping = allData.stream()
+                .collect(groupingBy(hm -> hm.get(topHeader), LinkedHashMap::new, toList()));
 
-        System.out.println("oneLevelGrouping: " + oneLevelGrouping);
+        //System.out.println("oneLevelGrouping: " + oneLevelGrouping);
 
         exportOneLevelGroupingToWordReport(oneLevelGrouping);
 
-        Map<String, Map<String, List<HashMap<String, String>>>> twoLevelGrouping = allData.stream()
-                .collect(Collectors.groupingBy(hm -> hm.get("CENTER"), Collectors.groupingBy(hm -> hm.get("SOCIETY_NAME"))));
+        Map<String, Map<String, List<LinkedHashMap<String, String>>>> twoLevelGrouping = allData.stream()
+                .collect(groupingBy(hm -> hm.get(topHeader), LinkedHashMap::new, groupingBy(hm -> hm.get(subHeaderKey), LinkedHashMap::new, toList())));
 
-        System.out.println("twoLevelGrouping: " + twoLevelGrouping);
+        //System.out.println("twoLevelGrouping: " + twoLevelGrouping);
 
         exportTwoLevelGroupingToWordReport(twoLevelGrouping);
     }
 
 
-    private void exportOneLevelGroupingToWordReport(Map<String, List<HashMap<String, String>>> data) throws IOException {
+    private void exportOneLevelGroupingToWordReport(Map<String, List<LinkedHashMap<String, String>>> data) throws IOException {
         XWPFDocument document = new XWPFDocument();
         //document.enforceReadonlyProtection();
         setDocumentMargins(document);
-        setDocumentFooter(document, "lalitB");
+        setDocumentFooter(document);
         createTablesWithOneLevelGrouping(document, data);
 
         FileOutputStream out = new FileOutputStream("report_one_level.docx");
@@ -137,11 +141,11 @@ public class MsWordReport {
 
     }
 
-    private void exportTwoLevelGroupingToWordReport(Map<String, Map<String, List<HashMap<String, String>>>> twoLevelGrouping) throws IOException {
+    private void exportTwoLevelGroupingToWordReport(Map<String, Map<String, List<LinkedHashMap<String, String>>>> twoLevelGrouping) throws IOException {
         XWPFDocument document = new XWPFDocument();
         //document.enforceReadonlyProtection();
         setDocumentMargins(document);
-        setDocumentFooter(document, "lalitB");
+        setDocumentFooter(document);
         createTablesWithTwoLevelGrouping(document, twoLevelGrouping);
 
         FileOutputStream out = new FileOutputStream("report_two_level.docx");
@@ -170,7 +174,7 @@ public class MsWordReport {
         pageSize.setH(BigInteger.valueOf(842 * 20));
     }
 
-    private void setDocumentFooter(XWPFDocument document, String currentUser) {
+    private void setDocumentFooter(XWPFDocument document) {
         XWPFFooter footer = document.createFooter(HeaderFooterType.DEFAULT);
 
         XWPFParagraph paragraph = footer.getParagraphArray(0);
@@ -179,16 +183,10 @@ public class MsWordReport {
         //addTabStop(paragraph, "CENTER", 3.25);
 
         XWPFRun run = paragraph.createRun();
-        run.setText("Time: ");
-        paragraph.getCTP().addNewFldSimple().setInstr("TIME \\@ \"dd.MM.yyyy HH:mm:ss\" \\* MERGEFORMAT");
+        run.setText("Swaminarayan Mandir Vasna Sanstha");
 
         run = paragraph.createRun();
         run.addTab();
-
-        run = paragraph.createRun();
-        run.setText("User: " + currentUser);
-
-        run = paragraph.createRun();
         run.addTab();
 
         run = paragraph.createRun();
@@ -198,12 +196,29 @@ public class MsWordReport {
         run.setText(" of ");
         paragraph.getCTP().addNewFldSimple().setInstr("NUMPAGES \\* MERGEFORMAT");
 
+        run = paragraph.createRun();
+        run.addTab();
+        run.addTab();
+
+        run = paragraph.createRun();
+        run.setText("By: " + user);
+
+        run = paragraph.createRun();
+        run.addTab();
+
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("EEE, d MMM yyyy HH:mm:ss");
+        LocalDateTime currentTime = LocalDateTime.now();
+
+        run.setText("At: " + currentTime.format(formatter));
+        //paragraph.getCTP().addNewFldSimple().setInstr("TIME \\@ \"dd.MMM.yyyy HH:mm:ss\" \\* MERGEFORMAT");
+
+
     }
 
-    private void createTablesWithOneLevelGrouping(XWPFDocument document, Map<String, List<HashMap<String, String>>> data) throws JSONException {
+    private void createTablesWithOneLevelGrouping(XWPFDocument document, Map<String, List<LinkedHashMap<String, String>>> data) throws JSONException {
 
-        for (Map.Entry<String, List<HashMap<String, String>>> record : data.entrySet()) {
-            List<HashMap<String, String>> firstGroup = record.getValue();
+        for (Map.Entry<String, List<LinkedHashMap<String, String>>> record : data.entrySet()) {
+            List<LinkedHashMap<String, String>> firstGroup = record.getValue();
             int numRows = firstGroup.size() + 2; //For Table header
 
 
@@ -221,11 +236,11 @@ public class MsWordReport {
 
             for (HashMap<String, String> stringStringHashMap : firstGroup) {
                 XWPFTableRow tableRow = table.getRow(rowNum.getAndIncrement());
-                for (int col = 0; col < columnKeys.size(); col++) {
+                for (int col = 0; col < headerKey.size(); col++) {
                     XWPFTableCell cell = tableRow.getCell(col);
                     cell.removeParagraph(0);
 
-                    String val = stringStringHashMap.get(columnKeys.get(col));
+                    String val = stringStringHashMap.get(headerKey.get(col));
                     cell.setText(val);
 
                 }
@@ -242,12 +257,12 @@ public class MsWordReport {
         //tableWidth.setW(BigInteger.valueOf(11400)); // Set table width to 5000 twips (1 inch = 1440 twips)
     }
 
-    private void createTablesWithTwoLevelGrouping(XWPFDocument document, Map<String, Map<String, List<HashMap<String, String>>>> data) throws JSONException {
+    private void createTablesWithTwoLevelGrouping(XWPFDocument document, Map<String, Map<String, List<LinkedHashMap<String, String>>>> data) throws JSONException {
 
-        for (Map.Entry<String, Map<String, List<HashMap<String, String>>>> groupRecord : data.entrySet()) {
+        for (Map.Entry<String, Map<String, List<LinkedHashMap<String, String>>>> groupRecord : data.entrySet()) {
             boolean flag = true;
-            for (Map.Entry<String, List<HashMap<String, String>>> record : groupRecord.getValue().entrySet()) {
-                List<HashMap<String, String>> groupedData = record.getValue();
+            for (Map.Entry<String, List<LinkedHashMap<String, String>>> record : groupRecord.getValue().entrySet()) {
+                List<LinkedHashMap<String, String>> groupedData = record.getValue();
                 int numRows = groupedData.size() + 3; //For Table header
                 XWPFTable table = createTable(document, numRows);
                 AtomicInteger rowNum = new AtomicInteger(0);
@@ -270,11 +285,11 @@ public class MsWordReport {
 
                 for (HashMap<String, String> stringStringHashMap : groupedData) {
                     XWPFTableRow tableRow = table.getRow(rowNum.getAndIncrement());
-                    for (int col = 0; col < columnKeys.size(); col++) {
+                    for (int col = 0; col < headerKey.size(); col++) {
                         XWPFTableCell cell = tableRow.getCell(col);
                         cell.removeParagraph(0);
 
-                        String val = stringStringHashMap.get(columnKeys.get(col));
+                        String val = stringStringHashMap.get(headerKey.get(col));
                         cell.setText(val);
 
                     }
@@ -304,7 +319,7 @@ public class MsWordReport {
 
         CTHMerge hMerge = CTHMerge.Factory.newInstance();
         hMerge.setVal(STMerge.RESTART);
-        for (int i = 0; i < columnKeys.size(); i++) {
+        for (int i = 0; i < headerKey.size(); i++) {
             XWPFTableCell cell = table.getRow(rowNum).getCell(i);
             addTcPr(cell);
             cell.getCTTc().getTcPr().setHMerge(hMerge);
@@ -319,7 +334,7 @@ public class MsWordReport {
 
     private void addTableHeaders(XWPFTable table, AtomicInteger rowNum) {
         XWPFTableRow tableRow = table.getRow(rowNum.getAndIncrement());
-        IntStream.range(0, columnNames.size())
+        IntStream.range(0, headerName.size())
                 .forEach(col -> {
                     XWPFTableCell cell = tableRow.getCell(col);
                     //cell.getParagraphs().get(0).getRuns().get(0).setBold(true);
@@ -333,7 +348,7 @@ public class MsWordReport {
                     // Create a new run within the paragraph
                     XWPFRun run = paragraph.createRun();
                     run.setBold(true);
-                    run.setText(columnNames.get(col));
+                    run.setText(headerName.get(col));
                     /*cell.getParagraphs().get(0).getRuns().get(0).setBold(true);
                     cell.setText(rowHeaders.get(col));*/
                 });
