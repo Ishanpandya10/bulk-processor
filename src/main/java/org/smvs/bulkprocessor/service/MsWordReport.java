@@ -19,9 +19,12 @@ import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTPageMar;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTPageSz;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTSectPr;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.STMerge;
+import org.openxmlformats.schemas.wordprocessingml.x2006.main.STPageOrientation;
 
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.math.BigInteger;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -112,17 +115,37 @@ public class MsWordReport {
         List<LinkedHashMap<String, String>> allData = objectMapper.readValue(data.toString(), new TypeReference<>() {
         });
 
+        Method method;
+        try {
+            method = this.getClass().getDeclaredMethod(methodName, List.class);
+            method.invoke(this, allData);
+        } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * Called From Reflection
+     *
+     * @param allData
+     * @throws IOException
+     */
+    private void generateOneLevelReport(List<LinkedHashMap<String, String>> allData) throws IOException {
         LinkedHashMap<String, List<LinkedHashMap<String, String>>> oneLevelGrouping = allData.stream()
                 .collect(groupingBy(hm -> hm.get(topHeader), LinkedHashMap::new, toList()));
 
-        //System.out.println("oneLevelGrouping: " + oneLevelGrouping);
-
         exportOneLevelGroupingToWordReport(oneLevelGrouping);
+    }
 
+    /**
+     * Called From Reflection
+     *
+     * @param allData
+     * @throws IOException
+     */
+    private void generateTwoLevelReport(List<LinkedHashMap<String, String>> allData) throws IOException {
         Map<String, Map<String, List<LinkedHashMap<String, String>>>> twoLevelGrouping = allData.stream()
                 .collect(groupingBy(hm -> hm.get(topHeader), LinkedHashMap::new, groupingBy(hm -> hm.get(subHeaderKey), LinkedHashMap::new, toList())));
-
-        //System.out.println("twoLevelGrouping: " + twoLevelGrouping);
 
         exportTwoLevelGroupingToWordReport(twoLevelGrouping);
     }
@@ -130,7 +153,7 @@ public class MsWordReport {
 
     private void exportOneLevelGroupingToWordReport(Map<String, List<LinkedHashMap<String, String>>> data) throws IOException {
         XWPFDocument document = new XWPFDocument();
-        //document.enforceReadonlyProtection();
+        document.enforceReadonlyProtection();
         setDocumentMargins(document);
         setDocumentFooter(document);
         createTablesWithOneLevelGrouping(document, data);
@@ -170,9 +193,18 @@ public class MsWordReport {
             sectPr.addNewPgSz();
         }
         CTPageSz pageSize = sectPr.getPgSz();
-        pageSize.setW(BigInteger.valueOf(595 * 20));
-        pageSize.setH(BigInteger.valueOf(842 * 20));
+
+        if (landscape) {
+            pageSize.setOrient(STPageOrientation.LANDSCAPE);
+            pageSize.setW(BigInteger.valueOf(842 * 20));
+            pageSize.setH(BigInteger.valueOf(595 * 20));
+        } else {
+            pageSize.setOrient(STPageOrientation.PORTRAIT);
+            pageSize.setH(BigInteger.valueOf(842 * 20));
+            pageSize.setW(BigInteger.valueOf(595 * 20));
+        }
     }
+
 
     private void setDocumentFooter(XWPFDocument document) {
         XWPFFooter footer = document.createFooter(HeaderFooterType.DEFAULT);
@@ -356,8 +388,13 @@ public class MsWordReport {
 
     private void addSpace(XWPFDocument document) {
         XWPFParagraph paragraph = document.createParagraph();
-        XWPFRun xwpfRun = paragraph.createRun();
-        xwpfRun.addBreak();
+        if (isNewPage) {
+            paragraph.setPageBreak(true);
+        } else {
+            XWPFRun xwpfRun = paragraph.createRun();
+            xwpfRun.addBreak();
+        }
+
     }
 
     private XWPFTable createTable(XWPFDocument document, int numRows) {
